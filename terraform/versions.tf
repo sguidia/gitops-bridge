@@ -2,17 +2,20 @@ terraform {
   required_version = ">= 1.0"
 
   required_providers {
+    # https://registry.terraform.io/providers/hashicorp/aws/latest
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 4.67.0"
+      version = ">= 5.97.0"
     }
+    #https://registry.terraform.io/providers/hashicorp/helm/latest
     helm = {
       source  = "hashicorp/helm"
-      version = ">= 2.10.1"
+      version = ">= 2.17.0"
     }
+    # https://registry.terraform.io/providers/hashicorp/kubernetes/latest
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "2.22.0"
+      version = ">= 2.36.0"
     }
   }
 

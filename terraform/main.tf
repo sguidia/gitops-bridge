@@ -1,34 +1,39 @@
 provider "aws" {
-  region = local.region
+  region  = local.region
+  profile = var.aws_profile
 }
 data "aws_caller_identity" "current" {}
 data "aws_availability_zones" "available" {}
+data "aws_eks_cluster_auth" "eks" {
+  name = module.eks.cluster_name
+} 
 
 
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      # This requires the awscli to be installed locally where Terraform is executed
-      args = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", local.region]
-    }
+    token                  = data.aws_eks_cluster_auth.eks.token
+    # exec {
+    #   api_version = "client.authentication.k8s.io/v1beta1"
+    #   command     = "aws"
+    #   # This requires the awscli to be installed locally where Terraform is executed
+    #   args = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", local.region]
+    # }
   }
 }
+
 
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    # This requires the awscli to be installed locally where Terraform is executed
-    args = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", local.region]
-  }
+  token                  = data.aws_eks_cluster_auth.eks.token
+  # exec {
+  #   api_version = "client.authentication.k8s.io/v1beta1"
+  #   command     = "aws"
+  #   # This requires the awscli to be installed locally where Terraform is executed
+  #   args = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", local.region]
+  # }
 }
 
 locals {
@@ -139,13 +144,18 @@ module "gitops_bridge_bootstrap" {
     addons   = local.addons
   }
 }
-
+output "addons_metadata" {
+  value = local.addons_metadata
+}
+output "addons_metadata1" {
+  value = local.addons
+}
 ################################################################################
 # EKS Blueprints Addons
 ################################################################################
 module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
-  version = "~> 1.22"
+  version = "~> 1.0"
 
   cluster_name      = module.eks.cluster_name
   cluster_endpoint  = module.eks.cluster_endpoint
@@ -181,11 +191,12 @@ module "eks_blueprints_addons" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 19.21"
+  version = "~> 21.0.0"
 
-  cluster_name                   = local.name
-  cluster_version                = local.cluster_version
-  cluster_endpoint_public_access = true
+  name                           = local.name
+  kubernetes_version             = local.cluster_version
+  endpoint_public_access         = true
+
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -200,9 +211,23 @@ module "eks" {
     }
   }
   # EKS Addons
-  cluster_addons = {
+  addons = {
     coredns    = {}
     kube-proxy = {}
+    vpc-cni = {
+      # Specify the VPC CNI addon should be deployed before compute to ensure
+      # the addon is configured before data plane compute resources are created
+      # See README for further details
+      before_compute = true
+      most_recent    = true # To ensure access to the latest settings provided
+      configuration_values = jsonencode({
+        env = {
+          # Reference docs https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html
+          ENABLE_PREFIX_DELEGATION = "true"
+          WARM_PREFIX_TARGET       = "1"
+        }
+      })
+    }
     aws-ebs-csi-driver = {
       service_account_role_arn = module.ebs_csi_driver_irsa.iam_role_arn
     }
@@ -212,12 +237,35 @@ module "eks" {
 
 
 
+
+data "aws_iam_user" "daboogie" {
+  user_name = "DaBoogie"
+}
+
+resource "aws_eks_access_entry" "daboogie" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = data.aws_iam_user.daboogie.arn
+}
+
+resource "aws_eks_access_policy_association" "daboogie_admin" {
+  cluster_name  = module.eks.cluster_name
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  principal_arn = data.aws_iam_user.daboogie.arn
+  access_scope {
+    type = "cluster"
+  }
+}
+
+
+
+
+
 # # Install Calico CNI using Helm
 # resource "helm_release" "calico" {
 #   name       = "calico"
 #   repository = "https://projectcalico.docs.tigera.io/charts"
 #   chart      = "tigera-operator"
-#   namespace  = "kube-sysytem"
+#   namespace  = "kube-system"
 #   create_namespace = true
 #   version    = "v3.30" # Use the desired Calico version
 
@@ -226,7 +274,7 @@ module "eks" {
 
 module "ebs_csi_driver_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "~> 5.59"
+  version = "~> 5.20"
 
   role_name_prefix = "${module.eks.cluster_name}-ebs-csi-"
 
@@ -247,7 +295,7 @@ module "ebs_csi_driver_irsa" {
 ################################################################################
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.21"
+  version = "~> 5.0"
 
   name = local.name
   cidr = local.vpc_cidr

@@ -1,3 +1,7 @@
+variable "aws_profile" {
+  description = "AWS profile to use for authentication"
+  type        = string
+}
 variable "vpc_cidr" {
   description = "VPC CIDR"
   type        = string
