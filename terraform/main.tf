@@ -127,6 +127,10 @@ locals {
       workload_repo_revision = local.gitops_workload_revision
     }
   )
+  argocd_apps = {
+    addons = file("${path.module}/bootstrap/addons.yaml")
+    workloads = file("${path.module}/bootstrap/workloads.yaml")
+  }
 
   tags = {
     Blueprint  = local.name
@@ -143,12 +147,7 @@ module "gitops_bridge_bootstrap" {
     metadata = local.addons_metadata
     addons   = local.addons
   }
-}
-output "addons_metadata" {
-  value = local.addons_metadata
-}
-output "addons_metadata1" {
-  value = local.addons
+  apps = local.argocd_apps
 }
 ################################################################################
 # EKS Blueprints Addons
